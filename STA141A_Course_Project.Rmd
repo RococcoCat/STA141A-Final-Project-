@@ -340,7 +340,7 @@ This matches what we see in the average success rate of the four mice since Cori
 
 We are interested in predicting feedback based on mouse, the contrast of the trial, and the spike firing data of that trial. Based on the Time vs Neuron graph above, there doesn't appear to be much of a pattern in the timing of the spike firing. Data analysis would be much easier if we were to reduce the dimensions of the spike firing data from 2D (time vs spike) to 1D (spike) so I have decided to removed the time data. In addition, the paper frequently uses the spike firing *rate* when performing data analysis which similarly removes the time component from their data. I will be creating a dataframe named mouse.spk.freq that contains the spike frequency for each brain area during each trial for all sessions. Even though we observe the activation of different brain areas throughout the different sessions, I believe it is fine to combine all the data into one dataframe because we are using the sum of the spike frequencies in each trial. This way 0's correspond to not seeing the brain area at all and there would essentially be no difference between NA's and 0's. 
 
-```{r, fig.width=7, fig.height=12}
+```{r,results="hide", fig.keep = "none"}
 
 # function to get frequency of spikes by brain area across trials
 # input = session number, dataframe to be outputted
@@ -438,34 +438,20 @@ mouse_nm = rep("Hench", dim(hench.df)[1])
 mouse.spk.freq = rbind.fill(mouse.spk.freq, cbind(mouse_nm, hench.df))
 mouse_nm = rep("Lederberg", dim(lederberg.df)[1])
 mouse.spk.freq = rbind.fill(mouse.spk.freq, cbind(mouse_nm, lederberg.df))
-mouse.spk.freq[is.na(mouse.spk.freq)] <- 0
+mouse.spk.freq[is.na(mouse.spk.freq)] = 0
 
-# mouse.spk.freq = mouse.spk.freq %>% relocate(ses_n)
+# Benchmark model
+ses_ls = c(1:2)
+benchmark = data.frame()
+benchmark = mouse.df(ses_ls, benchmark)
+benchmark[is.na(benchmark)] <- 0
 
+```
+
+```{r}
 kable(head(mouse.spk.freq), format = "html", table.attr = "class='table table-striped'",digits=2) 
 
 ```
-
-### Data Cleaning
-
-```{r}
-# Check for linearly dependent columns
-feature_map <- unlist(lapply(mouse.spk.freq, is.numeric)) 
-findLinearCombos((mouse.spk.freq[,feature_map]))
-```
-Since the goal of this project is to predict feedback using brain areas, linearly dependent columns would not be useful in our models because they would not provide any new information and should therefore be removed to reduce the complexity of our model. We do not see any linearly dependent columns in our dataset. 
-
-
-##### Data Cleaning
-```{r}
-# Check for imbalance in classes
-table(mouse.spk.freq$feedback)
-
-```
-
-The classes (0 or 1 feedback) is imbalanced. When testing our model, we should use a Precision-Recall curve instead of a ROC curve. 
-
-
 
 ### Visualizing patterns in our data
 
@@ -503,7 +489,7 @@ The first graph shows the frequency of all the different brain areas observed th
 
 ```{r, fig.width=10, fig.height=20}
 # Plot brain areas by feedback
-mouse.spk.freq[,-c(1,3,4)] %>% gather("area", "count", 2:63) %>% ggplot() +
+mouse.spk.freq[,-c(1,3,4)] %>% gather("area", "count", 2:dim(mouse.spk.freq[,-c(1,3,4)])[2]) %>% ggplot() +
   geom_col(mapping=aes(x=area, y=count, fill=as.factor(area))) +
   facet_wrap(vars(feedback)) +
   # scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
@@ -519,6 +505,72 @@ __can try graphing grouped by regional brain area (ie visual, frontal, etc.)__
 
 I will start with unsupervised learning which uses unlabeled data for visualization and dimension reduction purposes. The purpose of this is to find any useful patterns in the data or to simply our models by filtering out useful predictor variables. I will be using t-SNE for visualization and PCA for dimension reduction.
 
+
+### Data Cleaning
+
+```{r}
+# Check for linearly dependent columns
+feature_map <- unlist(lapply(mouse.spk.freq, is.numeric)) 
+findLinearCombos((mouse.spk.freq[,feature_map]))
+```
+Since the goal of this project is to predict feedback using brain areas, linearly dependent columns would not be useful in our models because they would not provide any new information and should therefore be removed to reduce the complexity of our model. We do not see any linearly dependent columns in our dataset. 
+
+
+```{r}
+# Check for imbalance in classes
+table(mouse.spk.freq$feedback)
+
+```
+
+The classes (0 or 1 feedback) is imbalanced. When testing our model, we should use a Precision-Recall curve instead of a ROC curve. 
+
+```{r, results="hide", fig.keep = "none"}
+# Remove outliers
+dim(mouse.spk.freq)
+original.data = mouse.spk.freq
+
+# create detect outlier function
+detect_outlier = function(x) {
+    Quantile1 = quantile(x, probs=.25)
+    Quantile3 = quantile(x, probs=.75)
+    IQR = Quantile3-Quantile1
+    x > Quantile3 + (IQR*1.5) | x < Quantile1 - (IQR*1.5)
+}
+
+# create remove outlier function
+remove_outlier = function(dataframe,                        columns=names(dataframe)) {
+
+    for (col in columns) {
+        dataframe = dataframe[!detect_outlier(dataframe[[col]]), ]
+    }
+    print(dataframe)
+}
+mouse.spk.freq = remove_outlier(mouse.spk.freq, colnames(mouse.spk.freq)[-1])
+mouse.spk.freq[is.na(mouse.spk.freq)] <- 0
+
+dim(mouse.spk.freq)
+
+# Remove columns with all 0's
+mouse.spk.freq = mouse.spk.freq[colSums(mouse.spk.freq != 0) > 0]
+
+dim(mouse.spk.freq)
+
+
+```
+
+```{r, fig.width=10, fig.height=20}
+# Plot brain areas by feedback
+mouse.spk.freq[,-c(1,3,4)] %>% gather("area", "count", 2:dim(mouse.spk.freq[,-c(1,3,4)])[2]) %>% ggplot() +
+  geom_col(mapping=aes(x=area, y=count, fill=as.factor(area))) +
+  facet_wrap(vars(feedback)) +
+  # scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  scale_y_continuous(guide=guide_axis(n.dodge = 1)) +
+  coord_flip() +
+  guides(fill=guide_legend(title="Brain Area"))
+
+```
+
+This is a plot of brain areas by feedback with the outliers removed. As we can see, there are much less brain areas compared to the previous graph. 
 
 ## Dimension Reduction
 
@@ -594,19 +646,39 @@ Another issue with the PCs is that on the scree plot, it is difficult to determi
 
 By running PCA on each of the individual mice dataset, I hope to find shared brain areas that explain a large amount of variation in the mice. The printed brain areas are the top 5 brain areas used in the PC loadings. 
 
-## Clustering
-```{r}
-# mouse.spk.freq.k2 = kmeans(mouse.spk.freq[,-c(1:4)], centers = 2)
-# mouse.spk.freq %>% mutate(cluster = mouse.spk.freq.k2$cluster) %>%
-#   ggplot(aes(x=mouse_nm, y=cluster, color = as.factor(feedback))) + 
-#   geom_point()
-```
-
 
 
 # Section 4 Predictive modeling. 
 
-Model training and prediction. Finally, we will build a prediction model to predict the outcome (i.e., feedback types). The performance will be evaluated on two test sets of 100 trials randomly selected from Session 1 and Session 18, respectively. The test sets will be released on the day of submission when you need to evaluate the performance of your model.
+Model training and prediction. Finally, we will build a prediction model to predict the outcome (i.e., feedback types). Since we have access to labeled data, it would be best to choose supervised machine learning models as they generally outperform unsupervised models in terms of accuracy. I will test a few different types of models including: 
+
+1. **Gradient Descent Based Algorithms**: Gradient descent based algorithms try to minimize the standard error of the model in steps.  
+
+
+- Logistic regression:   
+  - I chose to use logistic regression because this model is ideal for classifying binary data. Logistic regression also explains its choice in classification because it uses a maximum likelihood estimation to generate the probability of trials being in certain classes, then classifying based on those probabilities. 
+
+
+2. **Dimensionality Reduction**: Dimensionality reduction algorithms seek to reduce the number of features of a model, while keeping features that retain the most information in the dataset.
+
+- Linear Discreminant Analysis (LDA) 
+
+
+
+3. **Distance based algorithms**: Distance based algorithms attempt to classify data based on their relative distances. 
+
+
+- k-nearest neighbors (knn)
+- Support Vector Machine (SVM)
+
+
+4. **Tree based algorithms**: Tree based algorithms classify data using decision trees. 
+
+- Random forest
+
+
+The performance will be evaluated on two test sets of 100 trials randomly selected from Session 1 and Session 18, respectively. The test sets will be released on the day of submission when you need to evaluate the performance of your model. 
+
 
 
 ## Create Training and Testing Dataset Using Split-Sample Validation
@@ -614,13 +686,17 @@ Model training and prediction. Finally, we will build a prediction model to pred
 ```{r}
 set.seed(1)
 mouse.spk.freq$feedback[mouse.spk.freq$feedback==-1] = 0
+benchmark$feedback[benchmark$feedback==-1] = 0
 
 # Normalize data
 process <- preProcess(as.data.frame(mouse.spk.freq), method=c("range"))
 mouse.norm =  predict(process, as.data.frame(mouse.spk.freq))
+mouse.norm = mouse.norm[,-1]
 
 # Standardize data
 mouse.std <- mouse.spk.freq %>% mutate_at(-c(1:2), ~(scale(.) %>% as.vector))
+mouse.std = mouse.std[,-1]
+mouse.std[is.na(mouse.std)] <- 0
 
 # Training = 90% of data, Testing = 10% of data
 ##Generate a random number that is 90% of the total number of rows in dataset.
@@ -630,7 +706,28 @@ mouse.norm.test = mouse.norm[-ran,]
 
 mouse.std.train = mouse.std[ran,]
 mouse.std.test = mouse.std[-ran,]
+
+
+# Benchmark
+# Normalize data
+process <- preProcess(as.data.frame(benchmark), method=c("range"))
+benchmark.norm =  predict(process, as.data.frame(benchmark))
+
+# Standardize data
+benchmark.std <- benchmark %>% mutate_at(-c(1:2), ~(scale(.) %>% as.vector))
+benchmark.std[is.na(benchmark.std)] <- 0
+
+# Training = 90% of data, Testing = 10% of data
+##Generate a random number that is 90% of the total number of rows in dataset.
+ran <- sample(1:nrow(benchmark), 0.9 * nrow(benchmark)) 
+benchmark.norm.train = benchmark.norm[ran,]
+benchmark.norm.test = benchmark.norm[-ran,]
+
+benchmark.std.train = benchmark.std[ran,]
+benchmark.std.test = benchmark.std[-ran,]
+
 ```
+
 
 ## Building a Model
 
@@ -643,59 +740,172 @@ Since unsupervised learning is not very useful for classifying or making predict
 accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
 
 # Build log model
-log_model1.norm <- glm(mouse.norm.train$feedback ~ .,data = mouse.norm.train[-c(1:2)], family = "binomial")
+log.model <- glm(mouse.norm.train$feedback ~ .,data = mouse.norm.train, family = "binomial")
 
 # Get predictions
-predictions_log1.norm <- predict(log_model1.norm, mouse.norm.test, type="response")
+predictions.log <- predict(log.model, mouse.norm.test, type="response")
 
 # Choose cut off point
 pcut1<- mean(mouse.norm.train$feedback)
 
 # get binary prediction and confusion matrix
-predicted_feedback_log1 <- (predictions_log1.norm>pcut1)*1
-summary(log_model1.norm)
+predicted.feedback.log <- (predictions.log>0.5)*1
+summary(log.model)
 
-confusion.matrix.log1 = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log1))
-print(confusion.matrix.log1)
+cm.log = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted.feedback.log))
+print(cm.log)
 
-# Repeat logistic regression 100x
-avg_accuracy = 0
-
-for(i in 1:100){
-  set.seed(i)
-  ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
-  mouse.norm.train = mouse.norm[ran,]
-  mouse.norm.test = mouse.norm[-ran,]
-
-  log_model1.norm <- glm(mouse.norm.train$feedback ~ .,data = mouse.norm.train[-c(1)], family = "binomial")
-  predictions_log1.norm <- predict(log_model1.norm, mouse.norm.test, type="response")
-  pcut1<- mean(mouse.norm.train$feedback)
-  predicted_feedback_log1 <- (predictions_log1.norm>pcut1)*1
-  x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log1))
-  avg_accuracy = avg_accuracy + accuracy(x$table)
-}
-
-avg_accuracy = avg_accuracy / 100
-avg_accuracy
+# # Repeat logistic regression 100x
+# avg_accuracy = 0
+# 
+# for(i in 1:100){
+#   set.seed(i)
+#   ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
+#   mouse.norm.train = mouse.norm[ran,]
+#   mouse.norm.test = mouse.norm[-ran,]
+# 
+#   log_model1.norm <- glm(mouse.norm.train$feedback ~ .,data = mouse.norm.train[,-1], family = "binomial")
+#   predictions_log1.norm <- predict(log_model1.norm, mouse.norm.test, type="response")
+#   pcut1<- mean(mouse.norm.train$feedback)
+#   predicted_feedback_log1 <- (predictions_log1.norm>pcut1)*1
+#   x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log1))
+#   avg_accuracy = avg_accuracy + accuracy(x$table)
+# }
+# 
+# avg_accuracy = avg_accuracy / 100
+# avg_accuracy
 
 ```
+#### Benchmark
+
+```{r}
+# Compare to benchmark
+
+log_model.benchmark <- glm(feedback ~ .,data = benchmark.norm.train, family = "binomial")
+predictions_log.bench <- predict(log_model.benchmark, benchmark.norm.test, type="response")
+# pcut1<- mean(benchmark.norm.train$feedback)
+predicted_feedback_log_bench <- (predictions_log.bench>0.5)*1
+summary(log_model.benchmark)
+
+cm.log.bench = confusionMatrix(factor(benchmark.norm.test$feedback),factor(predicted_feedback_log_bench))
+print(cm.log.bench)
+
+# ROC
+pred <- prediction(predictions_log.bench, benchmark.norm.test$feedback)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+abline(0, 1, col="red")
+auc(benchmark.norm.test$feedback, predictions_log.bench, main = "ROC Curve")
+
+```
+
 
 I chose to use a logistic regression model because it is well suited for categorical data and since the data I am trying to classify is binary, this will be an especially simple model to create. Logistic regression is a classification algorithm and will give us the probabilities of samples belonging to certain classes or having certain algorithms. Therefore it is up to us to choose a probability cutoff for a sample belonging to a certain class. This can be done with a variety of algorithms or the cutoff can simply be set to 50% since our predicted variable is binary. We should choose a cutoff that maximizes the sensitivity-specificity metric
 
 The miscalculation rate of our logistic regression model on a normalized training and testing dataset depends on the training and testing dataset so after performing logistic regression on 100 different training and testing datasets, our average accuracy is 60.9%. Given that our data only has two possible outcomes (0 and 1), the expected accuracy is 50%, which means our model is somewhat better than random chance. 
 
+#### Interaction term
+
+Because a mouse is choosing between two contrasts on the left and right, there will be an interaction between the contrast_left and contrast_right variable, especially if both are non-zero at the same time. If a mouse has to choose between two non-zero contrasts, the difficulty of the trial will be greater, and the chance of negative feedback will also be greater. Therefore we should also include an interaction term between left and right contrast. It would also make sense to include interaction terms between brain areas that are in the same brain region (ie visual cortex) but because there are so many brain areas, including interaction terms for all of them, might make the model unnecessarily complex. 
+
+```{r}
+set.seed(1)
+
+# Build log model
+log_model.interaction <- glm(mouse.norm.train$feedback ~ . + contrast_right * contrast_left, data = mouse.norm.train, family = "binomial")
+
+# Get predictions
+predictions_log1.interaction <- predict(log_model.interaction, mouse.norm.test, type="response")
+
+# Choose cut off point
+pcut1<- mean(mouse.norm.train$feedback)
+
+# get binary prediction and confusion matrix
+predicted_feedback_log1_interaction <- (predictions_log1.interaction>pcut1)*1
+# summary(log_model.interaction)
+
+confusion.matrix.log1.interaction = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log1_interaction))
+print(confusion.matrix.log1.interaction)
+```
+
+
+#### Regularization: Lasso Regression
+
+```{r}
+library(glmnet)
+
+y = mouse.norm.train$feedback
+#perform k-fold cross-validation to find optimal lambda value
+cv_model <- cv.glmnet(as.matrix(mouse.norm.train[,-1]), y, alpha = 1)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+#produce plot of test MSE by lambda value
+plot(cv_model) 
+
+#find coefficients of best model
+best.log_model <- glmnet(as.matrix(mouse.norm.train[,-1]), y, alpha = 0, lambda = best_lambda)
+print(coef(best.log_model))
+
+#use lasso regression model to predict response value
+predicted.best.log1 = (predict(best.log_model, s = best_lambda, newx = as.matrix(mouse.norm.test[,-1]), type = "response") > 1) * 1
+
+confusion.matrix.log1 = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted.best.log1))
+print(confusion.matrix.log1)
+
+# # Choose coefficients with significant p value
+# #view p-value for all variables
+# kept_coeff = data.frame(pval = summary(log_model1.norm)$coefficients[-c(1:6),4]) %>% filter(pval < 0.05)
+# kept_coeff = rownames(kept_coeff)
+# kept_coeff = kept_coeff[2:length(kept_coeff)]
+# 
+# # Build log model 2 with selected coefficients
+# formula <- paste(kept_coeff, collapse = " + ")
+# formula = paste("feedback ~ ", formula)
+# log_model2.norm <- glm(formula,data = mouse.norm.train[-c(1)], family = "binomial")
+# predictions_log2.norm <- predict(log_model2.norm, mouse.norm.test, type="response")
+# predicted_feedback_log2 <- (predictions_log2.norm>pcut1)*1
+# summary(log_model2.norm) 
+# 
+# print(confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log2)))
+# 
+# 
+# # Repeat logistic regression 100x
+# avg_accuracy2 = 0
+# 
+# for(i in 1:100){
+#   set.seed(i)
+#   ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
+#   mouse.norm.train = mouse.norm[ran,]
+#   mouse.norm.test = mouse.norm[-ran,]
+# 
+#   log_model2.norm <- glm(formula,data = mouse.norm.train[-c(1)], family = "binomial")
+#   predictions_log2.norm <- predict(log_model2.norm, mouse.norm.test, type="response")
+#   predicted_feedback_log2 <- (predictions_log2.norm>pcut1)*1
+#   x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log2))
+#   avg_accuracy2 = avg_accuracy2 + accuracy(x$table)
+# }
+# 
+# avg_accuracy2 = avg_accuracy2 / 100
+# avg_accuracy2
+```
+
+#### Sensitivity Analysis
+
 ```{r}
 
 # ROC and AUC
-pred <- prediction(predictions_log1.norm, mouse.norm.test$feedback)
+pred <- prediction(predictions.log, mouse.norm.test$feedback)
 perf <- performance(pred, "tpr", "fpr")
 plot(perf)
 abline(0, 1, col="red")
-auc(mouse.norm.test$feedback, predictions_log1.norm, main = "ROC Curve")
+auc(mouse.norm.test$feedback, predictions.log, main = "ROC Curve")
 
 # PR Curve
 ### TODO: ADD BASELINE, INTERPRET!!! 
-pred.glm0.train<- predict(log_model1.norm, type="response")
+pred.glm0.train<- predict(log.model, type="response")
 score1= pred.glm0.train[mouse.norm.train$feedback==1]
 score0= pred.glm0.train[mouse.norm.train$feedback==0]
 pr= pr.curve(score1, score0, curve = T)
@@ -703,7 +913,7 @@ pr
 plot(pr, main="In-sample PR curve")
 
 # Out-of-sample prediction: 
-pred_glm0_test<- predict(log_model1.norm, newdata = mouse.norm.test, type="response")
+pred_glm0_test<- predict(log.model, newdata = mouse.norm.test, type="response")
 score1.test= pred_glm0_test[mouse.norm.test$feedback==1]
 score0.test= pred_glm0_test[mouse.norm.test$feedback==0]
 pr.test= pr.curve(score1.test, score0.test, curve = T)
@@ -711,24 +921,6 @@ pr.test
 plot(pr.test, main="Out-of-sample PR curve")
 
 
-# Calculate precision and recall for the baseline model
-# baseline_precision <- confusion.matrix.log1$table[2,2] / sum(diag(confusion.matrix.log1$table))
-# baseline_recall <- 1
-# baseline_pr_curve <- pr.curve(scores.class0 = baseline_precision, weights.class0 = baseline_recall, curve = T)
-# Calculate precision and recall for the baseline model
-# baseline_precision <- 0:100 / 100
-# baseline_recall <- rep(1, length(baseline_precision))
-# baseline_pr_curve <- pr.curve(scores.class0 = baseline_precision, weights.class0 = baseline_recall, curve = T)
-# pr
-# baseline_pr_curve
-# plot(pr, color = "red", auc.main = FALSE)
-# plot(baseline_pr_curve, color = "blue", add = TRUE)
-
-# fitControl <- trainControl(method = "cv",summaryFunction=prSummary,
-# classProbs=T,savePredictions = T,verboseIter = F)
-# im_fit <- train(feedback ~ ., data = mouse.norm.train,method = "ranger",metric = "AUC",
-# trControl = fitControl)
-# x <- evalm(list(pred.glm0.train))
 
 
 ```
@@ -738,70 +930,132 @@ The ROC (receiver operating characteristic curve) plots the true positive rate a
 
 The PR (precision-recall) curve is better suited to inbalanced classes which is what we observe in our dataset. It shows the relationship between precision (positive predictive power) and recall (sensitivity). Based on the PR curve, we can see that our model has similar performance on both the training and testing dataset. The AUC of the in-sample (training) set is 0.8277268 and the AUC of the out-sample (test) set is 0.8109447. This would mean that overfitting is not a significant issue in our model since the model performs similarly on both training and testing datasets. 
 
+#### Bootstrapping
+
+Bootstrapping is a technique where you resample from a dataset and the simulated samples are then used to calculate "standard errors, confidence intervals, and hypothesis testing." [20]. The results of bootstrapping should be similar to modeling with the original data but has the added benefit that it "will always work because it doesn’t assume any underlying distribution of the data"[20]. This can help us estimate model performance when applied to unobserved data.
+
 
 ```{r}
-# Choose coefficients with significant p value
-#view p-value for all variables
-kept_coeff = data.frame(pval = summary(log_model1.norm)$coefficients[-c(1:6),4]) %>% filter(pval < 0.05)
-kept_coeff = rownames(kept_coeff)
-kept_coeff = kept_coeff[2:length(kept_coeff)]
+# library(boot)
+# 
+# # function to calculate metric of interest
+# function_1 <- function(data, i){
+#  d2 <- data[i,] 
+#  return(cor(d2$feedback, d2[,3:dim(d2)[2]]))
+# }
+# 
+# set.seed(1)
+# bootstrap_correlation <- boot(mouse.norm,function_1,R=1000)
+# 
+# bootstrap_correlation
+# 
+# summary(bootstrap_correlation)
 
-# Build log model 2 with selected coefficients
-formula <- paste(kept_coeff, collapse = " + ")
-formula = paste("feedback ~ ", formula)
-log_model2.norm <- glm(formula,data = mouse.norm.train[-c(1)], family = "binomial")
-predictions_log2.norm <- predict(log_model2.norm, mouse.norm.test, type="response")
-predicted_feedback_log2 <- (predictions_log2.norm>pcut1)*1
-summary(log_model2.norm) 
-
-print(confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log2)))
-
-
-# Repeat logistic regression 100x
-avg_accuracy2 = 0
-
-for(i in 1:100){
-  set.seed(i)
-  ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
-  mouse.norm.train = mouse.norm[ran,]
-  mouse.norm.test = mouse.norm[-ran,]
-
-  log_model2.norm <- glm(formula,data = mouse.norm.train[-c(1)], family = "binomial")
-  predictions_log2.norm <- predict(log_model2.norm, mouse.norm.test, type="response")
-  predicted_feedback_log2 <- (predictions_log2.norm>pcut1)*1
-  x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(predicted_feedback_log2))
-  avg_accuracy2 = avg_accuracy2 + accuracy(x$table)
-}
-
-avg_accuracy2 = avg_accuracy2 / 100
-avg_accuracy2
 ```
+
+
+```{r}
+# # Bootstrap for model performance
+# 
+# # Containers for the coefficients
+# sample_coef <- data.frame(matrix(ncol=65))
+# colnames(sample_coef) = c("(Intercept)", colnames(mouse.norm)[-1])
+# for (i in 1:1000) {
+#   #Creating a resampled dataset from the sample data
+#   ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
+#   mouse.norm.train = mouse.norm[ran,]
+#   mouse.norm.test = mouse.norm[-ran,]
+#   
+#   #Running the regression on these data
+#   model_bootstrap <- glm(mouse.norm.train$feedback ~ .,data = mouse.norm.train[,-1], family = "binomial")
+#   
+#   #Saving the coefficients
+#   sample_coef = rbind(sample_coef, model_bootstrap$coefficients)
+#   }
+# sample_coef = sample_coef[-1,]
+# 
+# # Combining the results in a table
+# means.boot = c(lapply(sample_coef, mean))
+# kable(cbind(coef(summary(log_model1.norm))[, 1], as.matrix(means.boot)), 
+#       col.names = c("sample", "bootstrap"),
+#   "simple", caption = "Coefficients in different models")
+# 
+# # Confidence interval
+# 
+# conf_interval <-
+#   predict(
+#     log_model1.norm,
+#     newdata = data.frame(x = mouse.norm.test),
+#     interval = "confidence",
+#     level = 0.95)
+
+```
+
+#### Optimize logistic regression by choosing the appropriate cutoff
+
+```{r}
+cutoffs <- data.frame(prob = seq(1/1000, 1, length.out = 1000), val = NA)
+
+###Here's a quickly written function you can use to compute various performance metrics
+ConfusionStats <- function(model, threshold){
+  DF <- model.frame(model)
+  DF$prob <- predict(model, type = "response")
+  DF$flag <- ifelse(DF$prob > threshold, 1, 0)
+  Tab <- table(DF[[fit$formula %>% as.character %>% `[`(2)]], DF$flag) %>% as.data.frame
+
+  return(list(TP = Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1],
+          FP = Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1],
+          TN = Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 0],
+          FN = Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0],
+          Accuracy = (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 0]) / (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 0] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0]),
+          PPV =  Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / ( Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1]),
+          Precision = Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / ( Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1]),
+          Recall = Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0]),
+          Sensitivity = Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0]),
+          F1 = 2 * ( (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / ( Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1]) *
+                        Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0]))
+                     /( Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / ( Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 0 & Tab$Var2 == 1]) +
+                          Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] / (Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 1] + Tab$Freq[Tab$Var1 == 1 & Tab$Var2 == 0])))))}
+
+# ###And here's where you use the function and do the looping and visualize the curve
+# for(i in 1:1000){
+#   test$val[i] <- ifelse(length(ConfusionStats(threshold = test$prob[i], model = final)$F1) == 0, NA, ConfusionStats(threshold = test$prob[i], model = final)$F1)
+# }
+# plot(test)
+```
+
+
 
 I have also tried logistic regression with only coefficients that have a significant p-value, but this did not improve the accuracy of the model. The p value for a beta is equal to the probability of seeing our data given that there is in fact no significant relationship between the beta (brain area) and our output (feedback). A high p-value for a beta would mean that it is possible that there is no relationship between our variable and the output. But because removing betas with insignificant p values did not improve our model, it is possible our model is overfit and would not perform well given new data. 
 
 
-### LDA
+### Linear Discreminant Analysis (LDA)
 ```{r}
-# LINEAR DISCREMINANT ANALYSIS
+# LINEAR DISCREMINANT ANALYSIS [6]
 library(MASS)
+set.seed(1)
 
 theme_set(theme_classic())
 
 # Fit the model
-lda_model <- lda(feedback~., data = mouse.std.train[-c(1)])
+lda_model <- lda(feedback~., data = mouse.std.train)
 
 # Make predictions
 lda_predictions <- lda_model %>% predict(mouse.std.test)
 
 # Model accuracy
 mean(lda_predictions$class==mouse.std.test$feedback)
-predicted_feedback = lda_predictions$class
+predicted_feedback_lda = lda_predictions$class
 
 # Confusion matrix
-x  = confusionMatrix(factor(mouse.std.test$feedback),factor(predicted_feedback))
-x
-accuracy(x$table)
+cm.lda  = confusionMatrix(as.factor(mouse.std.test$feedback),as.factor(predicted_feedback_lda))
+cm.lda
+```
 
+
+#### Sensitivity Analysis
+
+```{r}
 
 # ROC and AUC
 pred <- prediction(lda_predictions$posterior[,2], mouse.std.test$feedback)
@@ -820,107 +1074,38 @@ plot(pr, main="In-sample PR curve")
 
 # Out-of-sample prediction: 
 lda_model.test <- predict(lda_model, type="response")
-score1= lda_model.test$x[mouse.std.test$feedback==1]
-score0= lda_model.test$x[mouse.std.test$feedback==0]
-pr= pr.curve(score1, score0, curve = T)
+score1.test= lda_model.test$x[mouse.std.test$feedback==1]
+score0.test= lda_model.test$x[mouse.std.test$feedback==0]
+pr.test= pr.curve(score1.test, score0.test, curve = T)
 plot(pr.test, main="Out-of-sample PR curve")
 
 
-avg_accuracy2 = 0
-max_accuracy = 0
-best_lda_model = 0
-
-for(i in 1:100){
-  set.seed(i)
-  ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
-  mouse.std.train = mouse.std[ran,]
-  mouse.std.test = mouse.std[-ran,]
-
-  lda_model <- lda(feedback~., data = mouse.std.train[-c(1)])
-  lda_predictions <- lda_model %>% predict(mouse.std.test)
-  predicted_feedback = lda_predictions$class
-  x  = confusionMatrix(factor(mouse.std.test$feedback),factor(predicted_feedback))
-  avg_accuracy = avg_accuracy + accuracy(x$table)
-  if (accuracy(x$table) > max_accuracy){
-    max_accuracy = accuracy(x$table)
-    best_lda_model = lda_model
-  }
-}
-
-avg_accuracy = avg_accuracy / 100
-sprintf("Average Accuracy: %s.", avg_accuracy)
-
-# Test average accuracy of best model on 100 datasets?
-best_avg_accuracy = 0 
-for(i in 1:100){
-  set.seed(i)
-  ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
-  mouse.std.train = mouse.std[ran,]
-  mouse.std.test = mouse.std[-ran,]
-
-  lda_predictions <- best_lda_model %>% predict(mouse.std.test)
-  predicted_feedback = lda_predictions$class
-  x  = confusionMatrix(factor(mouse.std.test$feedback),factor(predicted_feedback))
-  best_avg_accuracy = best_avg_accuracy + accuracy(x$table)
-}
-best_avg_accuracy = best_avg_accuracy / 100
-
-best_avg_accuracy
-
-avg_accuracy
 ```
+
+__Benchmark__
 ```{r}
-library(PredPsych)
-# k fold cross validation
+set.seed(1)
 
-LinearDA(Data = mouse.std.train[,-1], classCol = 1)
+lda_benchmark <- lda(feedback~., data = benchmark.std.train)
+lda_predictions_bench <- lda_benchmark %>% predict(benchmark.std.test)
+mean(lda_predictions_bench$class==benchmark.std.test$feedback)
+predicted_feedback_lda_bench = lda_predictions_bench$class
+x  = confusionMatrix(as.factor(benchmark.std.test$feedback),as.factor(predicted_feedback_lda_bench))
+x
 ```
 
-
-```{r}
-library(equalCovs)
-feedback1 = mouse.std %>% filter(feedback == 1)
-feedback0 = mouse.std %>% filter(feedback == 0)
-
-equalCovs(as.matrix(feedback1[,-c(1:2)]), as.matrix(feedback0[,-c(1:2)]), 125, 125)
-
-```
 
 
 Linear Discriminant Analysis (LDA) is used to classify data by projecting data onto a lower dimensional space and maximize the difference between classes. To use LDA, our data must have a Gaussian distribution and the covariance matrices of the different classes must be equal.
 
 For the linear discriminant analysis, I chose to standardize the data beforehand because standardization is useful when the distribution is Gaussian or unknown and is less sensitive to outliers compared to normalization. 
 
-LDA performs somewhat better than logistic regression with an average accuracy of 72.2% but still isn't very accurate. The AUC for our LDA model is 0.6609 and while this is better than logistic regression, a good model should have an AUC above 0.7. We would not want an AUC of 1 because our model might then be overfit. 
+LDA performs somewhat better than logistic regression with an average accuracy of 73.08% but still isn't very accurate. The AUC for our LDA model is 0.8109 and while this is better than logistic regression, a good model should have an AUC above 0.7. We would not want an AUC of 1 because our model might then be overfit. 
 
 
 ### k-Nearest Neighbors (knn)
 
-```{r}
-library(class)
-
-knn.model <- knn(mouse.norm.train[,-c(1,2)],mouse.norm.test[,-c(1,2)],cl=mouse.norm.train$feedback,k=13)
-x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(knn.model))
-# x
-# accuracy(x$table)
-
-avg_accuracy = 0
-
-for(i in 1:100){
-  set.seed(i)
-  ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
-  mouse.norm.train = mouse.norm[ran,]
-  mouse.norm.test = mouse.norm[-ran,]
-
-  knn.model <- knn(mouse.norm.train[,-c(1,2)],mouse.norm.test[,-c(1,2)],cl=mouse.norm.train$feedback,k=13)
-  x  = confusionMatrix(factor(mouse.norm.test$feedback),factor(knn.model))
-  avg_accuracy = avg_accuracy + accuracy(x$table)
-}
-
-
-avg_accuracy = avg_accuracy / 100
-avg_accuracy
-```
+We will first perform k-fold cross validation to determine the ideal k (number of nearest neighbors) to be used for our knn model. k-fold Cross Validation is a technique used to evaluate the performance of a model by splitting the data into k subsets and training the model on k-1 subsets and testing it on the remaining subset. This is repeated k times and the average accuracy is calculated.
 
 ```{r}
 # k-fold cross validation
@@ -929,36 +1114,114 @@ trControl <- trainControl(method  = "cv",
                           number  = 5)
 fit <- train(as.factor(feedback) ~ .,
              method     = "knn",
-             tuneGrid   = expand.grid(k = 1:10),
+             tuneGrid   = expand.grid(k = 1:20),
              trControl  = trControl,
              metric     = "Accuracy",
-             data       = mouse.norm.train[,-1])
+             data       = mouse.norm.train)
 
 
 fit
 ```
 
-k-fold Cross Validation is a technique used to evaluate the performance of a model by splitting the data into k subsets and training the model on k-1 subsets and testing it on the remaining subset. This is repeated k times and the average accuracy is calculated.
 
-## Bootstrapping
-
-Bootstrapping is a technique where you resample from a dataset and the simulated samples are then used to calculate "standard errors, confidence intervals, and hypothesis testing." [20]. The results of bootstrapping should be similar to modeling with the original data but has the added benefit that it "will always work because it doesn’t assume any underlying distribution of the data"[20].
 
 ```{r}
-# library(finalfit)
-# explanatory = c("age.factor", "extent.factor", "perfor.factor")
-# dependent = 'mort_5yr'
-# 
-# colon_s %>%
-#   finalfit_newdata(explanatory = explanatory, newdata = list(
-#     c("<40 years",  "Submucosa", "No"),
-#     c("<40 years", "Submucosa", "Yes"),
-#     c("<40 years", "Adjacent structures", "No"),
-#     c("<40 years", "Adjacent structures", "Yes") )) -> newdata
-# newdata
+library(class)
+set.seed(1)
+
+knn.model <- knn(mouse.norm.train[,-c(1,2)],mouse.norm.test[,-c(1,2)],cl=mouse.norm.train$feedback,k=13)
+cm.knn  = confusionMatrix(as.factor(mouse.norm.test$feedback),as.factor(knn.model))
+print(cm.knn)
+
 ```
 
 
+### Random Forest
+
+The random forest model does not have underlying assumptions about the data and therefore have increased flexibility and possibly accuracy compared to regression models (logistic regression). This model is also an improvement upon decision trees because over-fitting is not as much of a concern. T
+
+```{r}
+library(randomForest)
+set.seed(1)
+
+# Select mtry value with minimum out of bag(OOB) error.
+mtry <- tuneRF(mouse.norm[-1],mouse.norm$feedback, ntreeTry=500,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+
+# build model with best mtry value
+rf <-randomForest(as.factor(feedback)~.,data=mouse.norm, mtry=best.m, importance=TRUE,ntree=500)
+print(rf)
+
+#Evaluate variable importance
+importance(rf)
+varImpPlot(rf)
+
+# Confusion matrix
+rf.predicted = (pred1[,2]>0.5) * 1
+confusion.matrix.rf = confusionMatrix(factor(mouse.norm$feedback),factor(rf.predicted))
+print(confusion.matrix.rf)
+
+
+```
+
+The Random forest model works by generating multiple sample datasets using bootstrapping. Bootstrapping will select a pre-determined number of datapoints with replacement which may leave out certain datapoints. The datapoints that are not included in the training data are used to determine the out of bag error rate (OOB) which is the error rate of the random forest model on these datapoints. To select mtry (number of features to consider at each split point), we use the OOB as a cost function, and attempt to select the mtry that minimizes the OOB. 
+
+
+#### Sensitivity Analysis
+
+```{r}
+# prediction
+pred1=predict(rf,type = "prob")
+perf = prediction(pred1[,2], mouse.norm$feedback)
+# 1. Area under curve
+auc = performance(perf, measure = "auc")
+auc
+# 2. True Positive and Negative Rate
+pred3 = performance(perf, "tpr","fpr")
+# 3. Plot the ROC curve
+plot(pred3,main="ROC Curve for Random Forest",col=2,lwd=2)
+abline(a=0,b=1,lwd=2,lty=2,col="gray")
+
+
+auc(mouse.norm$feedback,rf.predicted)
+```
+
+
+
+### Kernel Support Vector Machine (SVM)
+
+```{r}
+library(caTools)
+library(e1071)
+set.seed(1)
+
+# Encoding the target feature as factor
+mouse.norm.train$feedback = factor(mouse.norm.train$feedback, levels = c(0, 1))
+ 
+svm.model = svm(formula = feedback ~ .,
+                 data = mouse.norm.train,
+                 type = 'C-classification', # regression classification
+                 kernel = 'radial')
+
+# Predicting the Test set results
+y_pred = predict(svm.model, newdata = mouse.norm.test[-1])
+
+# Making the Confusion Matrix
+cm  = confusionMatrix(as.factor(mouse.norm.test$feedback),as.factor(y_pred))
+cm
+
+# [25]
+```
+
+#### Sensitivity Analysis
+
+```{r}
+
+plot(svm.model, mouse.norm.train, root ~ contrast_right)
+```
 
 
 # Section 5 Prediction performance on the test sets. 
@@ -966,16 +1229,23 @@ Bootstrapping is a technique where you resample from a dataset and the simulated
 ## Model Accuracy
 
 ```{r}
-acc = data.frame(matrix(ncol=2))
-colnames(acc) = c("Model", "Accuracy (%)")
+acc = data.frame(matrix(ncol=5))
+colnames(acc) = c("Model", "Accuracy (%)", "Balanced Accuracy(%)","95% Confidence Interval", "AUC")
 
-acc[nrow(acc),] = c("logistic regression", 60.97446)
-acc[nrow(acc) + 1, ] = c("LDA", 69.82495)
-acc[nrow(acc) + 1, ] = c("kNN", 72.99214)
-kable(acc)
+acc[nrow(acc), ] = c("Benchmark (Logistic regression)", 67.57, 67.33, "(0.5021, 0.8199)", 0.622)
+acc[nrow(acc)+1,] = c("Logistic Regression", 74.24,   37.692, "(0.6199, 0.8422)",0.832633)
+acc[nrow(acc) + 1,] = c("Logistic Regression (with interaction)", 66.67, 57.72, "(0.5399, 0.778)", NA, NA)
+acc[nrow(acc) + 1, ] = c("LDA", 73.08, 63.056, "(0.6901, 0.7689)", 0.6175)
+acc[nrow(acc) + 1, ] = c("kNN", 74.85, 67.697, "(0.7085, 0.7857)", NA)
+acc[nrow(acc) + 1, ] = c("Random Forest", 73.43, 67.249, "(0.7219, 0.7464)", 0.6006)
+acc[nrow(acc) + 1, ] = c("kernel SVM", 73.67, 74.326, "(0.6962, 0.7745)", NA)
+
+
+kable(acc, align = c("l","r", "r", "r", "r"))
+
 ```
 
-
+Because our dataset is highly imbalanced (there are more positive than negative feedbacks), it would be more accurate to use the balanced accuracy as a metric for evaluating our model's performance.
 
 # Section 6 Discussion. 
 
@@ -1002,6 +1272,13 @@ kable(acc)
 	18.  https://www.geeksforgeeks.org/cross-validation-in-r-programming/#
 	19.  https://stats.stackexchange.com/questions/318968/knn-and-k-folding-n-r
 	20.  https://builtin.com/data-science/bootstrapping-statistics
+	21. https://towardsdatascience.com/a-practical-guide-to-bootstrap-with-r-examples-bd975ec6dce
+	22. https://www.statology.org/lasso-regression-in-r/
+	23. https://www.listendata.com/2014/11/random-forest-with-r.html#id-77c3f2
+	24. https://www.geeksforgeeks.org/how-to-remove-outliers-from-multiple-columns-in-r-dataframe/#
+	25. https://www.geeksforgeeks.org/classifying-data-using-support-vector-machinessvms-in-r/#
+	
+	
 
 
 
@@ -1015,13 +1292,12 @@ kable(acc)
 - Cross-validation
 - find optimal cutoff for logistic regression
 - trying diff ML models
-  - LDA
-  - kNN
   - SVM
 
 - **need to do more data cleaning**
   - remove linearly dependent cols, outlires, etc.
-- do regularization on models (before testing on test set)
+- do regularization on logistic reg
+- decision trees / random forest / SVM
 
 
 
