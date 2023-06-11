@@ -649,20 +649,17 @@ process <- preProcess(as.data.frame(mouse.spk.freq), method=c("range"))
 mouse.norm =  predict(process, as.data.frame(mouse.spk.freq))
 mouse.norm = mouse.norm[,-1]
 
-# Training = 90% of data, Testing = 10% of data
-##Generate a random number that is 90% of the total number of rows in dataset.
-ran <- sample(1:nrow(mouse.spk.freq), 0.9 * nrow(mouse.spk.freq)) 
+# Training = 80% of data, Testing = 20% of data
+##Generate a random number that is 80% of the total number of rows in dataset.
+ran <- sample(1:nrow(mouse.spk.freq), 0.8 * nrow(mouse.spk.freq)) 
 mouse.train = mouse.norm[ran,]
 mouse.test = mouse.norm[-ran,]
 
 # Benchmark
-# Normalize data
 process <- preProcess(as.data.frame(benchmark), method=c("range"))
 benchmark.norm =  predict(process, as.data.frame(benchmark))
 
-# Training = 90% of data, Testing = 10% of data
-##Generate a random number that is 90% of the total number of rows in dataset.
-ran <- sample(1:nrow(benchmark), 0.9 * nrow(benchmark)) 
+ran <- sample(1:nrow(benchmark), 0.8 * nrow(benchmark)) 
 benchmark.train = benchmark.norm[ran,]
 benchmark.test = benchmark.norm[-ran,]
 
@@ -683,6 +680,32 @@ Because our dataset has more positive than negative feedback, our dataset is imb
 
 Since unsupervised learning is not very useful for classifying or making predictions, it would be more useful to use supervised learning which takes labeled data (feedback) and uses it to train a model to make predictions based on brain areas.
 
+### Benchmark
+
+For the benchmark model, I created a logistic regression model using the data extracted from session 1 and 18 to create a benchmark training set then tested this model on the same test set I use for the other models. 
+
+```{r}
+# Benchmark
+set.seed(1)
+
+# Create benchmark model with benchmark.norm, test with test set used by other models (mouse.test)
+log_model.benchmark <- glm(feedback ~ .,data = benchmark.norm, family = "binomial")
+predictions_log.bench <- predict(log_model.benchmark, mouse.test, type="response")
+predicted_feedback_log_bench <- (predictions_log.bench>0.5)*1
+# summary(log_model.benchmark)
+
+cm.log.bench = confusionMatrix(factor(mouse.test$feedback),factor(predicted_feedback_log_bench), mode = "everything")
+print(cm.log.bench)
+
+# ROC
+pred <- prediction(predictions_log.bench, mouse.test$feedback)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+abline(0, 1, col="red")
+auc(mouse.test$feedback, predictions_log.bench, main = "ROC Curve")
+
+```
+
 ### Logistic Regression
 
 ```{r}
@@ -702,7 +725,7 @@ pcut1<- mean(mouse.train$feedback)
 
 # get binary prediction and confusion matrix
 predicted.feedback.log <- (predictions.log>0.5) * 1
-summary(log.model)
+# summary(log.model)
 
 cm.log = confusionMatrix(factor(mouse.test$feedback),factor(predicted.feedback.log), mode = "everything")
 print(cm.log)
@@ -766,30 +789,10 @@ cm.log.interaction = confusionMatrix(factor(mouse.test$feedback),factor(predicte
 print(cm.log.interaction)
 ```
 
-#### Benchmark
-
-```{r}
-# Benchmark
-set.seed(1)
-
-log_model.benchmark <- glm(feedback ~ .,data = benchmark.train, family = "binomial")
-predictions_log.bench <- predict(log_model.benchmark, benchmark.test, type="response")
-predicted_feedback_log_bench <- (predictions_log.bench>0.5)*1
-summary(log_model.benchmark)
-
-cm.log.bench = confusionMatrix(factor(benchmark.test$feedback),factor(predicted_feedback_log_bench), mode = "everything")
-print(cm.log.bench)
-
-# ROC
-pred <- prediction(predictions_log.bench, benchmark.test$feedback)
-perf <- performance(pred, "tpr", "fpr")
-plot(perf)
-abline(0, 1, col="red")
-auc(benchmark.test$feedback, predictions_log.bench, main = "ROC Curve")
-
-```
 
 ### Linear Discreminant Analysis (LDA)
+
+Linear Discriminant Analysis (LDA) is used to classify data by projecting data onto a lower dimensional space, then attempts to maximize the difference between classes. To use LDA, our data must have a Gaussian distribution and the covariance matrices of the different classes must be equal. LDA can 
 
 ```{r}
 # LINEAR DISCREMINANT ANALYSIS [6]
@@ -835,15 +838,14 @@ plot(pr.test, main="Out-of-sample PR curve")
 
 ```
 
-
-Linear Discriminant Analysis (LDA) is used to classify data by projecting data onto a lower dimensional space and maximize the difference between classes. To use LDA, our data must have a Gaussian distribution and the covariance matrices of the different classes must be equal.
-
 LDA performs somewhat better than logistic regression with an average accuracy of 73.08% but still isn't very accurate. The AUC for our LDA model is 0.6564 which would not qualify as a "good model" as a good model should have an AUC above 0.7. A perfect model would have an AUC of 1 which means it is perfectly accurate but would also very likely be be overfit. 
 
 
 ### k-Nearest Neighbors (knn)
 
-We will first perform k-fold cross validation to determine the ideal k (number of nearest neighbors) to be used for our knn model. k-fold Cross Validation is a technique used to evaluate the performance of a model by splitting the data into k subsets and training the model on k-1 subsets and testing it on the remaining subset. This is repeated k times and the average accuracy is calculated.
+knn is a non-parametric algorithm meaning it will perform well if our data is non linear. Non-parametric algorithms make "no assumptions ... about the shape of the decision boundary". [30] knn works by computing the distance between each datapoint to all other points then selecting k number of nearest neighbors and classifies based on the most frequent label. 
+
+We will first perform k-fold cross validation to determine the ideal k to be used for our knn model. k-fold Cross Validation is a technique used to evaluate the performance of a model by splitting the data into k subsets and training the model on k-1 subsets and testing it on the remaining subset. This is repeated k times and the average accuracy is calculated.
 
 
 ```{r, cache=TRUE}
@@ -877,9 +879,9 @@ cm.knn  = confusionMatrix(as.factor(mouse.test$feedback),as.factor((knn.pred[,2]
 print(cm.knn)
 ```
 
-I chose to use ROC (repeated cross validation) as the metric used to train the knn model. ROC is a bootstrapping method that allows the training dataset given to the model to be further split into training and testing datasets that will be used to improve the model. This spliting and training will then be done some specified number of times. Here I have decided to have the model repeat this process 5 times. Tune length species the number of tuning parameters the model should try to obtain the best performance. For a knn model, one of the most important parameters is k or the number of nearest neighbors and the `trainControl` will automatically select these parameters for us. 
+Here, I use ROC (repeated cross validation) as the metric used to train the knn model. ROC is a bootstrapping method that allows the training dataset given to the model to be further split into training and testing datasets that will be used to improve the model. This spliting and training will then be done some specified number of times. Here I have decided to have the model repeat this process 5 times. Tune length species the number of tuning parameters the model should try to obtain the best performance. For a knn model, one of the most important parameters is k or the number of nearest neighbors and the `trainControl` will automatically select these parameters for us. 
 
-Because knn "relies on observable data similarities and sophisticated distance metrics to generate accurate predictions" [29], it does not require a training dataset. Therefore I simply used the normalized mouse dataset to generate the model. The normalization step might not be required as the training function will likely preprocess the dataset anyway. 
+Because knn "relies on observable data similarities and sophisticated distance metrics to generate accurate predictions" [29], it does not require a training dataset and so I simply used the normalized mouse dataset to generate the model. The normalization step might not be required as the training function will likely preprocess the dataset anyway. 
 
 #### Sensitivity Analysis
 
@@ -901,7 +903,9 @@ auc(mouse.test$feedback,knn.predicted)
 
 ### Random Forest
 
-The random forest model does not have underlying assumptions about the data and therefore have increased flexibility and possibly accuracy compared to regression models (logistic regression). This model is also an improvement upon decision trees because over-fitting is not as much of a concern. Random forest models are also simpler to interpret compared to other non parametric models as it is essentially an amalgamation of decision trees which explain the decisions it makes based on each node. This allows us to generate a feature importance plot which tells us the importance of each feature for predictions. 
+Random forest is a machine learning model similar to decision trees but with the addition of bootstrapping to generate multiple sample datasets. Bootstrapping will select a pre-determined number of datapoints with replacement which may leave out certain datapoints. The datapoints that are not included in the training data are used to determine the out of bag error rate (OOB) which is the error rate of the random forest model on these datapoints. To select mtry (number of features to consider at each split point), we use the OOB as a cost function, and attempt to select the mtry that minimizes the OOB. 
+
+The random forest model does not have underlying assumptions about the data and therefore have increased flexibility and possibly accuracy compared to regression models (logistic regression) and overcomes the issue of over-fitting that is common with decision trees. Random forest models are also simpler to interpret compared to other non parametric models as it is essentially an amalgamation of decision trees which explain the decisions for classification based on each node. This allows us to generate a feature importance plot which tells us the importance of each feature for predictions. 
 
 ```{r, cache=TRUE}
 # Random Forest
@@ -935,9 +939,8 @@ print(cm.rf)
 
 ```
 
-The Random forest model works by generating multiple sample datasets using bootstrapping. Bootstrapping will select a pre-determined number of datapoints with replacement which may leave out certain datapoints. The datapoints that are not included in the training data are used to determine the out of bag error rate (OOB) which is the error rate of the random forest model on these datapoints. To select mtry (number of features to consider at each split point), we use the OOB as a cost function, and attempt to select the mtry that minimizes the OOB. 
 
-The variable importance plot shows the importance of each variable in classifying the data. The mean decrease in accuracy plot shows how much the accuracy of the model will decrease if that predictor variable was excluded from the model. The mean decrease in Gini coefficient shows how each variable contributes to the homogeneity of the nodes and leaves in the model. Higher vales in the mean decrease of Gini means that the variable produces more discriminative nodes and higher values in both graphs correlates with greater importance of that predictor variable. As we can see in the graphs, contrast, root and CA3 are very important in producing the random forest model. [28]
+The variable importance plot shows the importance of each variable in classifying the data represented as the decrease in accuracy if the predictor variable were to be excluded from the model (MeanDecreaseAccuracy) and the variable's contribution to the homogeneity of the nodes and leaves in the model (MeanDecreaseGini). Higher vales in the mean decrease of Gini coefficient means that the variable produces more discriminative nodes and higher values in both graphs correlates with greater importance of that predictor variable. As we can see in the graphs, contrast, root and CA3 are very important in producing the random forest model. [28]
 
 #### Sensitivity Analysis
 
@@ -1003,6 +1006,24 @@ auc(mouse.test$feedback,as.numeric(svm.pred))
 # [25]
 ```
 
+
+```{r}
+# Ensemble Voting
+
+# knn.pred <- predict(knn.model,mouse.test[,-1], type = 'prob')
+# knn.predicted = as.factor((knn.pred[,2]>0.5)*1)
+# 
+# 
+# cm.knn  = confusionMatrix(as.factor(mouse.test$feedback),as.factor((knn.pred[,2]>0.5)*1), mode = "everything")
+# print(cm.knn)
+# 
+# rf.pred <- predict(rf, mouse.test[,-1], type = 'prob')
+# rf.predicted = (rf.pred[,2]>0.5) * 1
+# 
+# svm.pred = predict(svm.model, newdata = mouse.test[-1])
+
+```
+
 # Section 5 Prediction performance on the test sets. 
 
 ## Model Accuracy
@@ -1024,7 +1045,7 @@ round(cm$byClass["Recall"]*100, digits=2))
 acc = data.frame(matrix(ncol=9))
 colnames(acc) = c("Model", "Accuracy (%)", "Balanced Accuracy(%)", "F1-Score", "AUC", "Sensitivity", "Specificity", "Precision", "Recall")
 
-acc[nrow(acc), ] = get_perf_metrics(benchmark.test, predictions_log.bench, cm.log.bench, "Benchmark (Logistic regression)")
+acc[nrow(acc), ] = get_perf_metrics(mouse.test, predictions_log.bench, cm.log.bench, "Benchmark (Logistic regression)")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, predictions.log, cm.log, "Logistic Regression")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, predictions_log1.interaction, cm.log.interaction, "Logistic Regression (with interaction)")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, lda_predictions$posterior[,2], cm.lda, "LDA")
@@ -1037,19 +1058,19 @@ kable(acc, align = c("l","r", "c", "c", "r", "r", "r", "r", "r"))
 
 Because our dataset is highly imbalanced (there are more positive than negative feedbacks), it would be more accurate to use the balanced accuracy as a metric for evaluating our model's performance. We can also use the F1-score as a measure of our models' accuracy. The F1-score compares a model's precision (correct positive predictions relative to the total number of positive predictions) and recall (correct positive predictions relative to the total number of actual positive predictions). A perfect F1-score of 1.0 means a model has perfect precision and recall while the lowest score of 0 means either precision or recall is 0. From the summary of my models' performance, we can see that knn appears to perform the best in terms of balanced accuracy and the F1 score. Τhe AUC (area under the curve) measures the area under the ROC (receiver operating characteristic curve) which plots the True vs False positive rates. An AUC of 0.5 is the same as a model that has equal true and false positive rates, while an AUC of 1 means a model is perfectly accurate. It is a bit concerning to see that the benchmarks performs better in terms of the AUC compared to my other models. 
 
-Though the benchmark model has a high accuracy and balanced accuracy, its F1 score is quite low which could mean that it would not perform as well on a dataset dataset (equal distribution of classes). The best model appears to be the **Random Forest** as it has the highest accuracy, balanced accuracy, and AUC and has a relatively high F1 score compared to the other models. 
+Though the benchmark model has a high accuracy and balanced accuracy, its F1 score is quite low which could mean that it would not perform as well on a dataset dataset (equal distribution of classes). The best model appears to be the *k-Nearest Neighbors** as it has the highest accuracy, balanced accuracy, and AUC and has a relatively high F1 score compared to the other models. 
 
 We can see that the non-parametric models (knn, Random Forest, and SVM) perform better than the parametric models (log regression, LDA) which implies that the data is non-linear as that is one of the major assumptions of parametric models. Non-parametric models do not estimate a fixed set of parameters. Instead, they rely on the available training data to derive the model's structure or make predictions. This can be problematic if the dataset is small or noisy as this can lead to overfitting. [3]
 
-Since the Benchmark model has a high AUC but a low F1-score, this could mean that the model may perform well on the skewed dataset but given a balanced dataset, the performance may decrease. AUC measures model performance based on false positive vs true positive while F1-score measures precision vs recall. The F1 score is computed at a particular decision threshold which I have chosen to be 0.5 while the AUC is computed across all thresholds so it could be possible that the benchmark is not performing well because I have not chosen an appropriate threshold. 
+Since many of my models have a high AUC but a low F1-score, this could mean that the model may perform well on the skewed dataset but given a balanced dataset, the performance may decrease. AUC measures model performance based on false positive vs true positive while F1-score measures precision vs recall. The F1 score is computed at a particular decision threshold which I have chosen to be 0.5 while the AUC is computed across all thresholds so it could be possible that the benchmark is not performing well because I have not chosen an appropriate threshold. 
 
 # Section 6 Discussion. 
 
 
 
 # Acknowledgement
-	1. Sai Suresh
-	2. Michelle Wong
+	1.  Sai Suresh
+	2.  Michelle Wong
 	3.  ChatGPT
 	4.  https://www.datacamp.com/tutorial/pca-analysis-r
 	5.  https://www.statology.org/train-test-split-r/
@@ -1077,7 +1098,8 @@ Since the Benchmark model has a high AUC but a low F1-score, this could mean tha
 	27. https://www.r-bloggers.com/2019/04/methods-for-dealing-with-imbalanced-data/
 	28. https://plos.figshare.com/articles/figure/Variable_importance_plot_mean_decrease_accuracy_and_mean_decrease_Gini_/12060105/1#:~:text=The%20mean%20decrease%20in%20Gini,the%20variable%20in%20the%20model.
 	29. https://neptune.ai/blog/knn-algorithm-explanation-opportunities-limitations#:~:text=This%20is%20much%20different%20from,metrics%20to%20generate%20accurate%20predictions.
-
+  30. https://nancyyanyu.github.io/posts/6084c2b2/
+  
 
 
 
@@ -1085,6 +1107,3 @@ Since the Benchmark model has a high AUC but a low F1-score, this could mean tha
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
 ```
 
-### Things to do
-
-- find optimal cutoff for logistic regression
