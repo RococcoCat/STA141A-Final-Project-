@@ -45,7 +45,9 @@ suppressPackageStartupMessages(library(ROCR))
 suppressPackageStartupMessages(library(pROC))
 suppressPackageStartupMessages(library(PRROC))
 suppressPackageStartupMessages(library(MLeval))
+```
 
+```{r, cache=TRUE}
 # load dataset
 session=list()
 for(i in 1:18){
@@ -325,34 +327,33 @@ We are interested in predicting feedback based on mouse, the contrast of the tri
 
 I will be creating a dataframe named `mouse.spk.freq` that contains the spike frequency for each brain area during each trial for all sessions. Even though we observe the activation of different brain areas throughout the different sessions, I believe it is acceptable to combine all the data into one dataframe since I will be using the *sum* of the spike frequencies in each trial. This means that 0's correspond to not seeing the brain area at all and there would essentially be no difference between NA's and 0's. 
 
-```{r,results="hide", fig.keep = "none"}
-
+```{r, cache=TRUE}
 # function to get frequency of spikes by brain area across trials
 # input = session number, dataframe to be outputted
 # output = dataframe with columns corresponding to brain areas, rows corresponding to trial
 # cells = frequency of spike in brain area
-spk_freq <- function(ses, mouse_df){
-  n.session1.brain = length(unique(session[[ses]]$brain_area))
-  n.session1 = length(session[[ses]]$feedback_type)
+spk_freq <- function(ses, mouse_df, session_data){
+  n.session1.brain = length(unique(session_data[[ses]]$brain_area))
+  n.session1 = length(session_data[[ses]]$feedback_type)
   mouse_df = data.frame(matrix(ncol=n.session1.brain))
-  colnames(mouse_df) = unique(session[[ses]]$brain_area)
+  colnames(mouse_df) = unique(session_data[[ses]]$brain_area)
   mouse_df = mouse_df[-1,]
   # loop through trials
   # loop through columns (time) in spike datasets and count freq of neurons
-  this_session = session[[ses]]
-  n.time = length(session[[ses]]$time[[1]])
+  this_session = session_data[[ses]]
+  n.time = length(session_data[[ses]]$time[[1]])
     
   for(i.t in 1:n.session1){
     spks=this_session$spks[[i.t]];
     n.neuron=dim(spks)[1]
     time.points=this_session$time[[i.t]]
     trial_sum = data.frame(matrix(ncol=n.session1.brain))
-    colnames(trial_sum) = unique(session[[ses]]$brain_area)
+    colnames(trial_sum) = unique(session_data[[ses]]$brain_area)
     for(i in 1:n.time){
         i.a=which(area== this_session$brain_area[i]);
         col.this=area.col[i.a]
         ids.spike=which(spks[,i]>0) # select rows with spikes
-        row_count = table(session[[ses]]$brain_area[ids.spike]) # get frequency of spike for each brain area
+        row_count = table(session_data[[ses]]$brain_area[ids.spike]) # get frequency of spike for each brain area
         if(length(row_count) > 0){
           trial_sum = rbind.fill(trial_sum, data.frame(rbind(row_count)))
         }
@@ -360,9 +361,9 @@ spk_freq <- function(ses, mouse_df){
     trial_sum = data.frame(t(colSums(trial_sum, na.rm = TRUE))) # sum freq of spikes in each trial
     mouse_df = rbind.fill(mouse_df, trial_sum)
   }
-  mouse_df = cbind(session[[ses]]$contrast_left,mouse_df)
-  mouse_df = cbind(session[[ses]]$contrast_right,mouse_df)
-  mouse_df = cbind(session[[ses]]$feedback_type,mouse_df)
+  mouse_df = cbind(session_data[[ses]]$contrast_left,mouse_df)
+  mouse_df = cbind(session_data[[ses]]$contrast_right,mouse_df)
+  mouse_df = cbind(session_data[[ses]]$feedback_type,mouse_df)
  
 
   names(mouse_df)[names(mouse_df) == "session[[ses]]$feedback_type"] <- "feedback"
@@ -375,13 +376,10 @@ spk_freq <- function(ses, mouse_df){
 
 
 # Create dataframe of spike freq for each mouse
-mouse.df <- function(ses_ls, mouse_df){
-  tmp1 = spk_freq(ses_ls[1], tmp)
-  # ses_n = rep(ses_ls[1], dim(tmp1)[1])
+mouse.df <- function(ses_ls, mouse_df, session_data){
+  tmp1 = spk_freq(ses_ls[1], tmp, session_data)
   for (i in ses_ls[2:length(ses_ls)]){
-    tmp = spk_freq(i, tmp)
-    # ses_n = rep(i, dim(tmp)[1])
-    # tmp = cbind(ses_n, tmp)
+    tmp = spk_freq(i, tmp, session_data)
     if(i == ses_ls[2]){
       mouse_df = rbind.fill(tmp1, tmp)
     }
@@ -395,22 +393,22 @@ mouse.df <- function(ses_ls, mouse_df){
 # Add the session number to our dataset
 ses_ls = c(1:3)
 cori.df = data.frame()
-cori.df = mouse.df(ses_ls, cori.df)
+cori.df = mouse.df(ses_ls, cori.df, session)
 cori.df[is.na(cori.df)] <- 0
 
 ses_ls = c(4:7)
 forssmann.df = data.frame()
-forssmann.df = mouse.df(ses_ls, forssmann.df)
+forssmann.df = mouse.df(ses_ls, forssmann.df, session)
 forssmann.df[is.na(forssmann.df)] <- 0
 
 ses_ls = c(8:11)
 hench.df = data.frame()
-hench.df = mouse.df(ses_ls, hench.df)
+hench.df = mouse.df(ses_ls, hench.df, session)
 hench.df[is.na(hench.df)] <- 0
 
 ses_ls = c(12:18)
 lederberg.df = data.frame()
-lederberg.df = mouse.df(ses_ls, lederberg.df)
+lederberg.df = mouse.df(ses_ls, lederberg.df, session)
 lederberg.df[is.na(lederberg.df)] <- 0
 
 # Use functions above to get spike data and mouse name
@@ -425,12 +423,20 @@ mouse_nm = rep("Lederberg", dim(lederberg.df)[1])
 mouse.spk.freq = rbind.fill(mouse.spk.freq, cbind(mouse_nm, lederberg.df))
 mouse.spk.freq[is.na(mouse.spk.freq)] = 0
 
+
+colnames(mouse.spk.freq)[2] = "feedback"
+colnames(mouse.spk.freq)[3] = "contrast_right"
+colnames(mouse.spk.freq)[4] = "contrast_left"
+
 # Benchmark model
 ses_ls = c(1, 18)
 benchmark = data.frame()
-benchmark = mouse.df(ses_ls, benchmark)
+benchmark = mouse.df(ses_ls, benchmark, session)
 benchmark[is.na(benchmark)] <- 0
 
+colnames(benchmark)[1] = "feedback"
+colnames(benchmark)[2] = "contrast_right"
+colnames(benchmark)[3] = "contrast_left"
 ```
 
 ```{r}
@@ -462,11 +468,11 @@ mouse.spk.freq[,-c(2:4)] %>% gather("area", "count", 2:63) %>% ggplot() +
 brain.areas.s$common_brain_areas = rowSums(brain.areas.s)==4
 common_brain_areas = brain.areas.s %>% filter(common_brain_areas==TRUE) %>% row.names()
 
-mouse.spk.freq[,-c(2:4)] %>% gather("area", "count", 2:63) %>% data.frame() %>% filter(area %in% common_brain_areas) %>% ggplot() +
+mouse.spk.freq[,-c(2:4)] %>% gather("area", "count", 2:63) %>% filter(area %in% common_brain_areas) %>% ggplot() +
   geom_col(mapping=aes(x=area, y=count, fill=as.factor(area))) +
   facet_wrap(vars(mouse_nm)) +
   guides(fill=guide_legend(title="Brain Area"))
-  
+
 ```
 
 The first graph shows the frequency of all the different brain areas observed throughout the entire experiment and the second graph shows the frequency of only the brain areas that are common to all the mice. We can see that the root neuron is very highly expressed in Lederberg and Forssman, both of which have higher success rates than the other mice. One theory for the higher success rates could be higher neural activity in some of the shared brain areas or unique neural activity in a mice that shows greater success in the tested activity (Lederberg).
@@ -557,32 +563,11 @@ We can see that there is a greater number of trials with positive compared to ne
 
 ## Dimension Reduction
 
-The purpose of Dimension Reduction is to find any useful patterns in the data or to simply our models by filtering out useful predictor variables. I will be using t-SNE to visualize patterns and PCA to find informative predictor variables. 
-
-### tSNE
-
-```{r}
-# t-SNE
-
-library(Rtsne)
-mouse.spk.freq$feedback[mouse.spk.freq$feedback==-1] <- 0
-
-colors = c("1"="red", "0"="blue")
-
-## Executing the algorithm on curated data
-tsne <- Rtsne(mouse.spk.freq[,-c(1:5)], dims = 2, perplexity=30, verbose=TRUE, max_iter = 500)
-
-## Plotting
-plot(tsne$Y, t='n', main="tsne")
-text(tsne$Y, labels=as.integer(cori.df$feedback), col=colors[as.character(cori.df$feedback)])
-
-```
-
-t-SNE is a dimensionality reduction tool that projects the data from higher to lower dimensions while preserving the relationships between the points. This helps us visualize structures and find patterns in our dataset. The data does not cluster in any meaningful way and the feedback variables are not clearly delineated in any of the clusters, so using t-SNE does not reveal any useful patterns in the data. 
+The purpose of Dimension Reduction is to find any useful patterns in the data or to simply our models by filtering out useful predictor variables. I will be PCA to find informative predictor variables. 
 
 ### PCA
 
-I will perform PCA on each of the different mice to see if they share the same brain areas that could be used in a predicition model. 
+I will perform PCA on each of the different mice to see if they share the same brain areas that could be used in a prediction model. 
 
 ```{r}
 # PCA
@@ -605,7 +590,7 @@ The PCs generated by PCA do not appear useful as each PC seems to explain an equ
 
 # Section 4 Predictive modeling. 
 
-Finally, we will build a prediction model to predict the outcome (i.e., feedback types). Since we have access to labeled data, it would be best to choose supervised machine learning models as they generally outperform unsupervised models in terms of accuracy. I will test a few different types of models including: 
+Finally, I will build a prediction model to predict the outcome (i.e., feedback types). Since we have access to labeled data, it would be best to choose supervised machine learning models as they generally outperform unsupervised models in terms of accuracy. I will test a few different types of models including: 
 
 1. **Gradient Descent Based Algorithms**: Gradient descent based algorithms try to minimize the standard error of the model in steps.  
 
@@ -669,8 +654,6 @@ up <- upSample(x=mouse.train[,-1], y=factor(mouse.train$feedback), yname="feedba
 # count(up$feedback)
 mouse.train = up %>% relocate(feedback)
 
-# head(mouse.train)
-# count(mouse.train$feedback)
 # [5],[26]
 ```
 
@@ -821,7 +804,6 @@ abline(a=0,b=1,lwd=2,lty=2,col="gray")
 auc(mouse.test$feedback, lda_predictions$posterior[,2])
 
 # PR Curve
-### TODO: ADD BASELINE, INTERPRET!!! 
 lda_model.train <- predict(lda_model, type="response")
 score1= lda_model.train$x[mouse.train$feedback==1]
 score0= lda_model.train$x[mouse.train$feedback==0]
@@ -942,6 +924,7 @@ print(cm.rf)
 
 The variable importance plot shows the importance of each variable in classifying the data represented as the decrease in accuracy if the predictor variable were to be excluded from the model (MeanDecreaseAccuracy) and the variable's contribution to the homogeneity of the nodes and leaves in the model (MeanDecreaseGini). Higher vales in the mean decrease of Gini coefficient means that the variable produces more discriminative nodes and higher values in both graphs correlates with greater importance of that predictor variable. As we can see in the graphs, contrast, root and CA3 are very important in producing the random forest model. [28]
 
+
 #### Sensitivity Analysis
 
 ```{r}
@@ -973,9 +956,6 @@ library(caTools)
 library(e1071)
 set.seed(1)
 
-# Encoding the target feature as factor
-# mouse.train$feedback = factor(mouse.train$feedback, levels = c(0, 1))
- 
 svm.model = svm(formula = feedback ~ .,
                  data = mouse.train,
                  type = 'C-classification', 
@@ -1006,25 +986,49 @@ auc(mouse.test$feedback,as.numeric(svm.pred))
 # [25]
 ```
 
+# Section 5 Prediction performance on the test sets. 
+
+## Testing the data
 
 ```{r}
-# Ensemble Voting
+# Read in test data
+test_session=list()
+for(i in 1:2){
+  test_session[[i]]=readRDS(paste('./Data/test/test',i,'.rds',sep=''))
+  # print(test[[i]]$mouse_name)
+  # print(test[[i]]$date_exp)
+}
 
-# knn.pred <- predict(knn.model,mouse.test[,-1], type = 'prob')
-# knn.predicted = as.factor((knn.pred[,2]>0.5)*1)
-# 
-# 
-# cm.knn  = confusionMatrix(as.factor(mouse.test$feedback),as.factor((knn.pred[,2]>0.5)*1), mode = "everything")
-# print(cm.knn)
-# 
-# rf.pred <- predict(rf, mouse.test[,-1], type = 'prob')
-# rf.predicted = (rf.pred[,2]>0.5) * 1
-# 
-# svm.pred = predict(svm.model, newdata = mouse.test[-1])
+# Format test as dataframe
+ses_ls = c(1, 2)
+test = data.frame(matrix(ncol=length(colnames(mouse.norm))))
+test_tmp = data.frame()
+colnames(test) = colnames(mouse.norm)
+test_tmp = mouse.df(ses_ls, test_tmp, test_session)
+colnames(test_tmp)[1] = "feedback"
+colnames(test_tmp)[2] = "contrast_right"
+colnames(test_tmp)[3] = "contrast_left"
+test = right_join(test, test_tmp)
+test[is.na(test)] <- 0
+
+# head(test)
+
+table(test$feedback)
+
+# Normalize data
+process <- preProcess(as.data.frame(test), method=c("range"))
+test.norm =  predict(process, as.data.frame(test))
+
+# Predict feedback using knn model
+knn.pred.test <- predict(knn.model, test.norm[,-1], type = 'prob')
+knn.pred.test.feedback <-prediction(knn.pred.test[,2], test.norm$feedback)
+cm.knn.test  = confusionMatrix(as.factor(test.norm$feedback),as.factor((knn.pred.test[,2]>0.5)*1), mode = "everything")
+knn.predicted.test = (knn.pred.test[,2]>0.5)*1
+
+print(cm.knn.test)
 
 ```
 
-# Section 5 Prediction performance on the test sets. 
 
 ## Model Accuracy
 
@@ -1045,7 +1049,10 @@ round(cm$byClass["Recall"]*100, digits=2))
 acc = data.frame(matrix(ncol=9))
 colnames(acc) = c("Model", "Accuracy (%)", "Balanced Accuracy(%)", "F1-Score", "AUC", "Sensitivity", "Specificity", "Precision", "Recall")
 
-acc[nrow(acc), ] = get_perf_metrics(mouse.test, predictions_log.bench, cm.log.bench, "Benchmark (Logistic regression)")
+# Test set
+acc[nrow(acc), ] = get_perf_metrics(test, knn.predicted.test, cm.knn.test, "Test Set (knn)")
+
+acc[nrow(acc)+1, ] = get_perf_metrics(mouse.test, predictions_log.bench, cm.log.bench, "Benchmark (Logistic regression)")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, predictions.log, cm.log, "Logistic Regression")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, predictions_log1.interaction, cm.log.interaction, "Logistic Regression (with interaction)")
 acc[nrow(acc)+1,] = get_perf_metrics(mouse.test, lda_predictions$posterior[,2], cm.lda, "LDA")
@@ -1056,16 +1063,17 @@ acc[nrow(acc)+1,] =  get_perf_metrics(mouse.test, as.numeric(svm.pred), cm.svm, 
 kable(acc, align = c("l","r", "c", "c", "r", "r", "r", "r", "r"))
 ```
 
+# Section 6 Discussion. 
+
+We can see that my knn model performs fairly well on the test set despite the test set not including all predictor variables that the knn was trained on and having many more positive compared to negative feedback. 
+
 Because our dataset is highly imbalanced (there are more positive than negative feedbacks), it would be more accurate to use the balanced accuracy as a metric for evaluating our model's performance. We can also use the F1-score as a measure of our models' accuracy. The F1-score compares a model's precision (correct positive predictions relative to the total number of positive predictions) and recall (correct positive predictions relative to the total number of actual positive predictions). A perfect F1-score of 1.0 means a model has perfect precision and recall while the lowest score of 0 means either precision or recall is 0. From the summary of my models' performance, we can see that knn appears to perform the best in terms of balanced accuracy and the F1 score. Τhe AUC (area under the curve) measures the area under the ROC (receiver operating characteristic curve) which plots the True vs False positive rates. An AUC of 0.5 is the same as a model that has equal true and false positive rates, while an AUC of 1 means a model is perfectly accurate. It is a bit concerning to see that the benchmarks performs better in terms of the AUC compared to my other models. 
 
-Though the benchmark model has a high accuracy and balanced accuracy, its F1 score is quite low which could mean that it would not perform as well on a dataset dataset (equal distribution of classes). The best model appears to be the *k-Nearest Neighbors** as it has the highest accuracy, balanced accuracy, and AUC and has a relatively high F1 score compared to the other models. 
+Though the benchmark model has a high accuracy and balanced accuracy, its F1 score is quite low which could mean that it would not perform as well on a balanced dataset (equal distribution of classes). The best model appears to be the *k-Nearest Neighbors** as it has the highest accuracy, balanced accuracy, and AUC and has a relatively high F1 score compared to the other models. 
 
 We can see that the non-parametric models (knn, Random Forest, and SVM) perform better than the parametric models (log regression, LDA) which implies that the data is non-linear as that is one of the major assumptions of parametric models. Non-parametric models do not estimate a fixed set of parameters. Instead, they rely on the available training data to derive the model's structure or make predictions. This can be problematic if the dataset is small or noisy as this can lead to overfitting. [3]
 
-Since many of my models have a high AUC but a low F1-score, this could mean that the model may perform well on the skewed dataset but given a balanced dataset, the performance may decrease. AUC measures model performance based on false positive vs true positive while F1-score measures precision vs recall. The F1 score is computed at a particular decision threshold which I have chosen to be 0.5 while the AUC is computed across all thresholds so it could be possible that the benchmark is not performing well because I have not chosen an appropriate threshold. 
-
-# Section 6 Discussion. 
-
+Precision refers to a model's ability to accurately predict positive results while recall and sensitivity refers to a model's ability to find all positive results. Specificity refers to a model's ability to find all negative results. These are especially useful metrics for evaluating a model's performance on an unbalanced dataset as a model may perform differently when predicting positive vs negative feedback. We can see that my models tend to perform better in terms of specificity, sensitivity, and recall which means that it is better able to find all possible positive results though it is less able to discern positive from negative feedback. 
 
 
 # Acknowledgement
